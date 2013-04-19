@@ -3,9 +3,6 @@ VERSION=0.4.1
 PKGNAME=emysql
 APP_NAME=emysql
 
-MODULES=$(shell ls -1 src/*.erl | awk -F[/.] '{ print $$2 }' | sed '$$q;s/$$/,/g')
-MAKETIME=$(shell date)
-
 all: crypto_compat app
 	(cd src;$(MAKE))
 
@@ -98,3 +95,22 @@ build_plt:
 
 dialyzer:
 	dialyzer --fullpath -nn --plt $(COMBO_PLT) ebin
+
+rel: epmd-fix build
+	rebar generate target-dir=rel/mysql
+
+build: deps
+	rebar compile
+	
+deps:
+	rebar get-deps
+
+run: rel
+	rel/mysql/bin/mysql console
+
+rclean:
+	rebar clean
+
+epmd-fix:
+	epmd -daemon
+	ps ax | grep epmd | grep -v grep && epmd -kill
