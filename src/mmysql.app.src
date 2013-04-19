@@ -1,0 +1,14 @@
+{application, mmysql,
+ [
+  {description, "Erlang MySQL Driver"},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  crypto,
+                  poolboy
+                 ]},
+  {mod, { mmysql, []}},
+  {env, []}
+ ]}.

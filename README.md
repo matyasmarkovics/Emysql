@@ -1,3 +1,15 @@
+# Warning
+
+This is a fork of Eonblast/Emysql, which turns connection handling upside down:
+
+* Using a "gen\_fsm" as a proxy process for each connection
+* Setting database and collation/encoding in the connection phase
+* Only allowing statements to be prepared prior to start-up (from config file)
+* Using poolboy project as a worker pool handling
+
+*HIGHLY UNSTABLE*, only try this at home!
+
+
 # Emysql
 
 [![Build Status](https://travis-ci.org/Eonblast/Emysql.png?branch=master)](https://travis-ci.org/Eonblast/Emysql)

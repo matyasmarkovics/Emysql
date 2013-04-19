@@ -3,6 +3,7 @@
 %% Jacob Vorreuter <jacob.vorreuter@gmail.com>
 %% Henning Diedrich <hd2010@eonblast.com>
 %% Jesper Louis Andersen <jesper.louis.andersen@gmail.com>
+%% Matyas Markovics <markovics.matyas@gmail.com>
 %%
 %% Permission is hereby granted, free of charge, to any person
 %% obtaining a copy of this software and associated documentation
@@ -31,10 +32,14 @@
 -module(emysql_auth).
 
 -export([handshake/3]).
+-export([
+    do_handshake/5,
+    read_greeting/1,
+    auth_packet/7
+    ]).
 
 -include("emysql.hrl").
 -include("emysql_internal.hrl").
-
 -include("crypto_compat.hrl").
 
 %% API
@@ -147,9 +152,117 @@ auth(Sock, User, Password, #greeting { seq_num = SeqNum } = Greeting) ->
         #eof_packet{seq_num = EofSeqNum} ->
             PacketOld = auth_packet_old(Password, Greeting),
             emysql_tcp:send_and_recv_packet(Sock, PacketOld, EofSeqNum+1);
+
+        
+do_handshake(Sock, User, Password, Collation, Database) ->
+	 io:format("~p handshake: recv_greeting~n", [self()]),
+	Greeting = recv_greeting(Sock),
+	 io:format("~p handshake: auth~n", [self()]),
+	case do_auth(Sock, Greeting#greeting.seq_num+1, User, Password,
+                     Greeting#greeting.salt1, Greeting#greeting.salt2, Greeting#greeting.plugin,
+                     Collation, Database) of
+		OK when is_record(OK, ok_packet) ->
+			 io:format("~p handshake: ok~n", [self()]),
+			ok;
+		Err when is_record(Err, error_packet) ->
+			 io:format("~p handshake: FAIL ~p -> EXIT ~n~n", [self(), Err]),
+			exit({failed_to_authenticate, Err});
+		Other ->
+			 io:format("~p handshake: UNEXPECTED ~p -> EXIT ~n~n", [self(), Other]),
+			exit({unexpected_packet, Other})
+	end,
+	Greeting.
+
+recv_greeting(Sock) ->
+     io:format("~p recv_greeting~n", [self()]),
+    GreetingPacket = emysql_tcp:recv_packet(Sock, ?TIMEOUT),
+     io:format("~p recv_greeting ... received ...~n", [self()]),
+    read_greeting(GreetingPacket#packet.data).
+
+
+read_greeting(GreetingPacket = #packet{ data = <<255, _/binary>> }) ->
+    io:format("error: ", []), 
+    {#error_packet{
+            code = Code,
+            msg = Msg
+            },_} = emysql_tcp:response(sock, GreetingPacket),
+    io:format("exit: ~p~n-------------~p~n", [Code, Msg]), 
+    exit({Code, Msg});
+read_greeting(#packet{seq_num = SeqNum, data = <<ProtocolVersion:8/integer, Rest1/binary>> }) ->
+    io:format("prl v: ~p~n-------------~p~n", [ProtocolVersion, Rest1]), 
+    {ServerVersion, Rest2} = asciiz(Rest1),
+    io:format("srv v: ~p~n-------------~p~n", [ServerVersion, Rest2]),
+    <<ThreadID:32/little, Rest3/binary>> = Rest2,
+    io:format("tread id: ~p~n-------------~p~n", [ThreadID, Rest3]),
+    {Salt, Rest4} = asciiz(Rest3),
+    io:format("salt: ~p~n-------------~p~n", [Salt, Rest4]), 
+    <<LowCaps:16/little, Rest5/binary>> = Rest4,
+    io:format("caps: ~p~n-------------~p~n", [hcaps(LowCaps), Rest5]),
+    <<ServerLanguage:8/little,
+      ServerStatus:16/little,
+      HighCaps:16/little,
+      ScrambleLength:8/little,
+      _:10/binary-unit:8,
+      Rest6/binary>> = Rest5,
+    io:format("lang: ~p, status: ~p, caps: ~p, salt len: ~p~n-------------~p ~n", [ServerLanguage, ServerStatus, hcaps(HighCaps*?CLIENT_MULTI_STATEMENTS), ScrambleLength, Rest6]),
+    Salt2Length = case ScrambleLength of 0 -> 13; _-> ScrambleLength - 8 end,
+    <<Salt2Bin:Salt2Length/binary-unit:8, Rest7/binary>> = Rest6,
+    {Salt2, <<>>} = asciiz(Salt2Bin),
+    {Plugin, <<>>} = asciiz(Rest7),
+    io:format("salt 2: ~p~n", [Salt2]),
+    io:format("plugin: ~p~n", [Plugin]),
+    #greeting{
+        protocol_version = ProtocolVersion,
+        server_version = ServerVersion,
+        thread_id = ThreadID,
+        salt1 = Salt,
+        salt2 = Salt2,
+        caps = LowCaps,
+        caps_high = HighCaps,
+        language = ServerLanguage,
+        status = ServerStatus,
+        seq_num = SeqNum,
+        plugin = Plugin
+        };
+read_greeting(What) ->
+     io:format("~p recv_greeting FAILED: ~p~n", [self(), What]),
+    exit({greeting_failed, What}).
+
+do_auth(Sock, SeqNum, User, Password, Salt1, Salt2, Plugin, Collation, Database) ->
+    Packet = auth_packet(User, Password, Salt1, Salt2, Plugin, Collation, Database),
+    case emysql_tcp:send_and_recv_packet(Sock, ?TIMEOUT, Packet, SeqNum) of
+        #eof_packet{seq_num = SeqNum1} ->
+            AuthOld = password_old(Password, Salt1),
+            emysql_tcp:send_and_recv_packet(Sock, ?TIMEOUT, <<AuthOld/binary, 0:8>>, SeqNum1+1);
         Result ->
             Result
     end.
+
+auth_packet(User, Password, Salt1, Salt2, Plugin, Collation, Database) ->
+    ScrambleBuff = if
+        is_list(Password) orelse is_binary(Password) ->
+            case Plugin of
+                ?MYSQL_OLD_PASSWORD ->
+                    password_old(Password, Salt1); % untested
+                ?MYSQL_NATIVE_PASSWORD ->
+                    password_new(Password, Salt1 ++ Salt2)
+            end;
+        true ->
+            <<>>
+    end,
+    
+    CollationNo = proplists:get_value(Collation, ?COLLATIONS, ?DEFAULT_COLLATION), 
+    {DBCaps, ZenDatabase} = if is_binary(Database) ->
+            {?CONNECT_WITH_DB, <<Database/binary, 0:8>>};
+        true -> {0, <<>>}
+    end,
+    Caps = ?LONG_PASSWORD  bor ?CLIENT_LOCAL_FILE bor ?LONG_FLAG bor ?TRANSACTIONS bor
+           ?CLIENT_MULTI_STATEMENTS bor ?CLIENT_MULTI_RESULTS bor
+           ?PROTOCOL_41 bor ?SECURE_CONNECTION bor DBCaps,
+    Maxsize = ?MAXPACKETSIZE,
+    UserB = unicode:characters_to_binary(User),
+    PasswordL = size(ScrambleBuff),
+    <<Caps:32/little, Maxsize:32/little, CollationNo:8, 0:23/integer-unit:8, UserB/binary, 0:8, PasswordL:8, ScrambleBuff/binary, ZenDatabase/binary>>.
 
 password_new([], _Salt) -> <<>>;
 password_new(Password, Salt) ->
@@ -202,3 +315,30 @@ hash([], N1, N2, _Add) ->
 asciiz(Data) when is_binary(Data) ->
     [S, R] = binary:split(Data, <<0>>),
     {S, R}.
+
+hcaps(Caps) ->
+    HCaps = [
+        {?LONG_PASSWORD, "LONG_PASSWORD"},
+        {?FOUND_ROWS, "FOUND_ROWS"},
+        {?LONG_FLAG, "LONG_FLAG"},
+        {?CONNECT_WITH_DB, "CONNECT_WITH_DB"},
+        {?NO_SCHEMA, "NO_SCHEMA"},
+        {?COMPRESS, "COMPRESS"},
+        {?ODBC, "ODBC"},
+        {?CLIENT_LOCAL_FILE, "CLIENT_LOCAL_FILES"},
+        {?IGNORE_SPACE, "IGNORE_SPACE"},
+        {?PROTOCOL_41, "PROTOCOL_41"},
+        {?INTERACTIVE, "INTERACTIVE"},
+        {?SSL , "SSL"},
+        {?IGNORE_SIGPIPE, "IGNORE_SIGPIPE"},
+        {?TRANSACTIONS, "TRANSACTIONS"},
+        {?RESERVED, "RESERVED"},
+        {?SECURE_CONNECTION, "SECURE_CONNECTION"},
+        {?CLIENT_MULTI_STATEMENTS, "CLIENT_MULTI_STATEMENTS"},
+        {?CLIENT_MULTI_RESULTS, "CLIENT_MULTI_RESULTS"},
+        {?CLIENT_PS_MULTI_RESULTS, "CLIENT_PS_MULTI_RESULTS"},
+        {?PLUGIN_AUTH, "PLUGIN_AUTH"},
+        {?CONNECT_ATTRS,  "CONNECT_ATTRS"},
+        {?PLUGIN_AUTH_LENENC_CLIENT_DATA, "PLUGIN_AUTH_LENENC_CLIENT_DATA"}
+        ],
+    [ H || {C, H} <- HCaps, C band Caps /= 0 ].
