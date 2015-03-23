@@ -31,8 +31,9 @@ all() ->
     [ 
       stuck_waiting_1, % former two_procs
       stuck_waiting_2, 
-      pool_leak_1,     % former no_lock_timeout
-      pool_leak_2
+      %pool_leak_1,     % former no_lock_timeout
+      pool_leak_2,
+      dying_client_does_not_lock_the_connection_out
     ].
 
 
@@ -43,7 +44,7 @@ init_per_suite(Config) ->
     crypto:start(),
     application:start(emysql),
     emysql:add_pool(test_pool, 1,
-        "hello_username", "hello_password", "localhost", 3306,
+        test_helper:test_u(), test_helper:test_p(), "localhost", 3306,
         "hello_database", utf8),
     Config.
     
@@ -52,6 +53,20 @@ init_per_suite(Config) ->
 end_per_suite(_) ->
 	ok.
 
+init_per_testcase(dying_client_does_not_lock_the_connection_out, Config) ->
+    LockTimeout = emysql_app:lock_timeout(),
+    DefaultTimeout = emysql_app:default_timeout(),
+    application:set_env(emysql, lock_timeout, 15000),
+    application:set_env(emysql, default_timeout, 15000),
+    [{old_sysconfig, [{lock_timeout, LockTimeout}, {default_timeout, DefaultTimeout}]} | Config];
+init_per_testcase(_, Config) ->
+    Config.
+
+end_per_testcase(dying_client_does_not_lock_the_connection_out, Config) ->
+    [ application:set_env(emysql, K, V) || {K, V} <- proplists:get_value(old_sysconfig, Config) ],
+    Config;
+end_per_testcase(_, Config) ->
+    Config.
 
 %% Test Case: Test two processes trying to share one connection
 %% Test for Issue 9
@@ -127,8 +142,8 @@ stuck_waiting_2(_) ->
     % find needed time for the sql command
     {Micro, _} = timer:tc(?MODULE, ?TRY_RACE, [1]),
     Timeout = trunc(Micro / 1000 * LenienceFactor) + 100,
-    io:format("Seen execution time: ~p µs (microseconds)~n", [Micro]),
-    io:format("Set timeout: ~p ms (milliseconds)~n", [Timeout]),
+    ct:log("Seen execution time: ~p ï¿½s (microseconds)~n", [Micro]),
+    ct:log("Set timeout: ~p ms (milliseconds)~n", [Timeout]),
 
     %% Warn about time when run with actual MySQL query for TRY_RACE.
     Timeout > 5000 andalso
@@ -143,10 +158,10 @@ stuck_waiting_2(_) ->
      || _ <- lists:seq(1,Processes)],
     [receive
 	 {'EXIT', _, normal} -> 
-	    io:format("One process complete, other could now use connections.", []);
+	    ct:log("One process complete, other could now use connections.", []);
 	 {'EXIT', _, connection_lock_timeout} -> 
-	    io:format("One process exits stuck in timeout.", []),
-	    io:format("Timout was set to ~pms to be sure it can even outlast complete starvation by the other process and really indicatetes that even a free connection could be assigned to this process. Loops: ~p, used time for one sample SQL operation: ~p ms.", 
+	    ct:log("One process exits stuck in timeout.", []),
+	    ct:log("Timout was set to ~pms to be sure it can even outlast complete starvation by the other process and really indicatetes that even a free connection could be assigned to this process. Loops: ~p, used time for one sample SQL operation: ~p ms.", 
 	    [Timeout, Loops, Micro/1000]),
 	    exit(issue9_stuck_waiting);
 	 {'EXIT', _, Reason} -> exit({unexpected_error, Reason})
@@ -172,14 +187,18 @@ stuck_waiting_2(_) ->
 pool_leak_2(_) ->
     Processes = 100,
     Loops = 10,
+    EmptyGb = gb_trees:empty(),
     
     %% find this output via test/index.html
     [Pool] = emysql_conn_mgr:pools(),
-    io:format("Pool available at start: ~p~n", [Pool#pool.available]),
+    ct:log("Pool available at start: ~p~n", [Pool#pool.available]),
 
     %% preliminary test
-    {[{emysql_connection, _,test_pool,_,_,_,_,_,_,{0,nil}, undefined,true}], 
-     []} = Pool#pool.available ,
+    [#emysql_connection{pool_id     = test_pool,
+                        prepared    = EmptyGb,
+                        locked_at   = undefined,
+                        alive       = true,
+                        test_period = 0}] = queue:to_list(Pool#pool.available),
 
     %% Brief timeout for test
     OldEnv = application:get_env(emysql, lock_timeout),
@@ -195,11 +214,14 @@ pool_leak_2(_) ->
 
     %% Test if pool still has one connection (and available)
     [Pool1] = emysql_conn_mgr:pools(),
-    io:format("Pool available after test: ~p~n", [Pool1#pool.available]),
-    case Pool1#pool.available of
-        {[{emysql_connection, _,test_pool,_,_,_,_,_,_,{0,nil}, undefined,true}],
-         []} -> ok;
-        {[],[]} -> exit(issue9_pool_leak);
+    ct:log("Pool available after test: ~p~n", [Pool1#pool.available]),
+    case queue:to_list(Pool1#pool.available) of
+        [#emysql_connection{pool_id     = test_pool,
+                            prepared    = EmptyGb,
+                            locked_at   = undefined,
+                            alive       = true,
+                            test_period = 0}] -> ok;
+        [] -> exit(issue9_pool_leak);
         E -> exit({unexpected_error, E})
     end,
     
@@ -228,3 +250,14 @@ make_queries(Loops) ->
     [ #result_packet{} = emysql:execute(test_pool, "describe hello_table")
      || _ <- lists:seq(1,Loops)
     ].
+
+%% Test Case: Make sure that the pool is still usable after a waiting client dies
+dying_client_does_not_lock_the_connection_out(_Config) ->
+    #result_packet{} = emysql:execute(test_pool, "select 1"),
+    F1 = fun() -> emysql:execute(test_pool, "select sleep(5);", 15000) end,
+    Client = spawn(F1),
+    timer:sleep(1000),
+
+    exit(Client, kill),
+    timer:sleep(1000),
+    #result_packet{} = emysql:execute(test_pool, "select 1").

@@ -1,11 +1,11 @@
 % ------------------------------------------------------------------------
-% Emysql: sample for accessing rows as records
-% H. Diedrich <hd2010@eonblast.com> - Eonblast http://www.eonblast.com
-% 12 Jun 2010
+% Emysql: sample for accessing rows as json
+% M. Dorner <dorner.michal@gmail.com>
+% 17 Jun 2013
 % ------------------------------------------------------------------------
 %
-% This sample does the same as the previous samples but uses a record
-% to access the result row.
+% This sample does the same as the previous samples but converts row data to erlang representation of JSON.
+% For actual JSON string use jsx (https://github.com/talentdeficit/jsx) or jiffy (https://github.com/davisp/jiffy).
 %
 % ------------------------------------------------------------------------
 %
@@ -20,17 +20,17 @@
 %
 % On *nix build and run using the batch a_hello in folder samples/:
 %
-% $ ./c_rows_as_records
+% $ ./g_rows_as_json
 %
-% - or - 
+% - or -
 %
 % Make emysql and start this sample directly, along these lines:
 %
 % $ cd Emysql
 % $ make
 % $ cd samples
-% $ erlc c_rows_as_records.erl
-% $ erl -pa ../ebin -s c_rows_as_records run -s init stop -noshell
+% $ erlc g_rows_as_json.erl
+% $ erl -pa ../ebin -s g_rows_as_json run -s init stop -noshell
 %
 % ------------------------------------------------------------------------
 %
@@ -40,20 +40,12 @@
 % ... many PROGRESS REPORT lines ...
 % ...
 %
-% Record: <<"Hello World!">>
+% JSON: [[{<<"hello_text">>,<<"Hello World!">>}]]
 %
 % ------------------------------------------------------------------------
 
--module(c_rows_as_records).
+-module(g_rows_as_json).
 -export([run/0]).
-
-%% -----------------------------------------------------------------------
-%% Record Definition:                                                    1
-%% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
--record(hello_record, {hello_text}).
-
-%% -----------------------------------------------------------------------
 
 
 run() ->
@@ -73,25 +65,22 @@ run() ->
 
 	Result = emysql:execute(hello_pool, <<"SELECT * from hello_table">>),
 
-	%% ------------------------------------------------------------------- 
-	%% Records Fetch:                                                    2
-	%% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+	%% -------------------------------------------------------------------
+	%% JSON Fetch:                                                      2
+	%% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-	Recs = emysql_util:as_record(
-		Result, hello_record, record_info(fields, hello_record)),
+	JSON = emysql:as_json(Result),
 
 	%% -------------------------------------------------------------------
 
 	io:format("~n~s~n", [string:chars($-,72)]),
 
 	%% -------------------------------------------------------------------
-	%% Records Use:                                                      3
-	%% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+	%% JSON Use   :                                                      3
+	%% - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-	[begin
-      io:format("Record: ~p~n", [Rec#hello_record.hello_text])
-    end || Rec <- Recs],
-    
+    io:format("JSON: ~p~n", [JSON]),
+
 	%% -------------------------------------------------------------------
 
     ok.

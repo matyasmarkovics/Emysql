@@ -22,16 +22,17 @@
 %% WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 %% FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 %% OTHER DEALINGS IN THE SOFTWARE.
+%% @private
 -module(emysql_sup).
 -behaviour(supervisor).
 
 -export([start_link/0 ,init/1]).
 
 start_link() ->
-	supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init(_) ->
-	{ok, {{one_for_one, 10, 10}, [
-		{emysql_statements, {emysql_statements, start_link, []}, permanent, 5000, worker, [emysql_statements]},
-		{emysql_conn_mgr, {emysql_conn_mgr, start_link, []}, permanent, 5000, worker, [emysql_conn_mgr]}
-	]}}.
+    {ok, {{one_for_one, 10, 10}, [
+        {emysql_statements, {emysql_statements, start_link, []}, permanent, 5000, worker, [emysql_statements]},
+        {emysql_conn_mgr, {emysql_conn_mgr, start_link, []}, permanent, 5000, worker, [emysql_conn_mgr]}
+    ]}}.
