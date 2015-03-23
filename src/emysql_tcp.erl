@@ -34,6 +34,7 @@
 -export([
         packets/1,
         send_packet/3,
+        recv_parse/2,
         parse/1,
         response/1,
         do_response_list/4,
@@ -258,20 +259,22 @@ parse_rows(<<PacketLength:24/little-integer, SeqNum:8/integer, Rest/binary>>, Fi
     end.
 
 do_send_and_recv_packet(Sock, Timeout, Packet, SeqNum) ->
-        send_packet(Sock, Packet, SeqNum),
-         io:format("~p send_and_recv_packet: response_list~n", [self()]),
-        case do_response_list(Sock, Timeout, ?SERVER_MORE_RESULTS_EXIST, []) of
-		% sometimes returns a list, e.g. for stored procedures,
-		[Record] ->
-			 io:format("~p send_and_recv_packet: record~n", [self()]),
-			Record;
-		List ->
-			 io:format("~p send_and_recv_packet: list~n", [self()]),
-			List
-	end.
+    send_packet(Sock, Packet, SeqNum),
+    recv_parse(Sock, Timeout).
 
-do_response_list(_, _, 0, Acc) -> lists:reverse(Acc);
+recv_parse(Sock, Timeout) ->
+    io:format("~p send_and_recv_packet: response_list~n", [self()]),
+    case response_list(Sock, Timeout, ?SERVER_MORE_RESULTS_EXIST, []) of
+        % sometimes returns a list, e.g. for stored procedures,
+        {[Record], T} ->
+            io:format("~p send_and_recv_packet: record~n", [self()]),
+            {Record, T};
+        {List, T} ->
+            io:format("~p send_and_recv_packet: list~n", [self()]),
+            {List, T}
+    end.
 
+do_response_list(_, T, 0, Acc) -> {lists:reverse(Acc), T};
 do_response_list(Sock, Timeout, ?SERVER_MORE_RESULTS_EXIST, Acc) ->
         {Packet, Used} = do_recv_packet(Sock, Timeout),
 	{Response, Status, TimeoutRem} =  case response(Packet) of
@@ -310,7 +313,7 @@ response(#packet{seq_num = SeqNum, data = <<?RESP_OK:8, Rest/binary>>}=_Packet) 
 	<<ServerStatus:16/little, WarningCount:16/little, Rest3/binary>> = Rest2, % (*)!
         {Msg, <<>>} = lcs(Rest3),
 	 io:format("- warnings: ~p~n", [WarningCount]),
-	 io:format("- server status: ~p~n", [emysql_conn:hstate(ServerStatus)]),
+	 io:format("- server status: ~p~n", [hstate(ServerStatus)]),
 	#ok_packet{
 		seq_num = SeqNum,
 		affected_rows = AffectedRows,
@@ -328,7 +331,7 @@ response(#packet{seq_num = SeqNum, data = <<?RESP_EOF:8>>}=_Packet) ->
 response(#packet{seq_num = SeqNum, data = <<?RESP_EOF:8, WarningCount:16/little, ServerStatus:16/little>>}=_Packet) -> % (*)!
 	 io:format("~nresponse (EOF v 4.1), Warn Count: ~p, Status ~p, Raw: ~p~n", [WarningCount, ServerStatus, _Packet]),
 	 io:format("- warnings: ~p~n", [WarningCount]),
-	 io:format("- server status: ~p~n", [emysql_conn:hstate(ServerStatus)]),
+	 io:format("- server status: ~p~n", [hstate(ServerStatus)]),
 	#eof_packet{
 		seq_num = SeqNum,
 		status = ServerStatus,
@@ -404,7 +407,7 @@ do_recv_field_list(Sock, Timeout, [_|T], Acc) ->
 
 
 read_field_list(#packet{seq_num = SeqNum1, data = <<?RESP_EOF, WarningCount:16/little, ServerStatus:16/little>>}) -> % (*)!
-     io:format("- eof: ~p~n", [emysql_conn:hstate(ServerStatus)]),
+     io:format("- eof: ~p~n", [hstate(ServerStatus)]),
     #eof_packet{
 	seq_num = SeqNum1,
 	status = ServerStatus,
@@ -450,7 +453,7 @@ do_recv_row_data(Sock, Timeout, FieldList, SeqNum, RowData, Acc) ->
     do_recv_row_data(Sock, Timeout-Used, FieldList, SeqNum+1, read_row_data(Packet), [decode_row_data(RowData, FieldList)|Acc]).
 
 read_row_data(#packet{seq_num = SeqNum1, data = <<?RESP_EOF, WarningCount:16/little, ServerStatus:16/little>>}) ->
-    io:format("- eof: ~p~n", [emysql_conn:hstate(ServerStatus)]),
+    io:format("- eof: ~p~n", [hstate(ServerStatus)]),
     #eof_packet{
         seq_num = SeqNum1,
         status = ServerStatus,
@@ -635,3 +638,10 @@ lcs(Bin) ->
     {Length, Rest} = lcb(Bin),
     << String:Length/binary, Excess/binary>> = Rest,
     {String, Excess}.
+
+% human readable string rep of the server state flag
+%% @private
+hstate(State) ->
+    case (State band ?SERVER_STATUS_AUTOCOMMIT) of 0 -> ""; _-> "AUTOCOMMIT " end
+        ++ case (State band ?SERVER_MORE_RESULTS_EXIST) of 0 -> ""; _-> "MORE_RESULTS_EXIST " end
+            ++ case (State band ?SERVER_QUERY_NO_INDEX_USED) of 0 -> ""; _-> "NO_INDEX_USED " end.

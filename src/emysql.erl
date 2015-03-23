@@ -97,7 +97,6 @@
 
 -module(emysql).
 
-
 %% Life cycle API
 %% These are used to handle the life-cycle of the code base
 -export([   start/0, stop/0,
@@ -305,6 +304,8 @@ add_pool(#pool{pool_id=PoolId,size=Size,user=User,password=Password,host=Host,po
 %% @equiv add_pool(PoolId, Size, User, Password, Host, Port, Database, Encoding, [])
 %% @end
 
+add_pool(PoolId, Size, User, Password, Host, Port, Database, Encoding) when is_list(Encoding) ->
+    add_pool(PoolId, Size, User, Password, Host, Port, Database, list_to_existing_atom(Encoding));
 add_pool(PoolId, Size, User, Password, Host, Port, Database, Encoding) ->
     add_pool(PoolId, Size, User, Password, Host, Port, Database, Encoding, []).
 
@@ -340,10 +341,6 @@ add_pool(PoolId, Size, User, Password, Host, Port, Database,
 %%
 %% @doc Synchronous call to the connection manager to remove a pool.
 %%
-%% === Implementation ===
-%%
-%% Relies on emysql_conn:close_connection(Conn) for the proper closing of connections. Feeds
-%% any connection in the pool to it, also the locked ones.
 %% @end doc: hd feb 11
 
 remove_pool(PoolId) ->
@@ -359,7 +356,6 @@ increment_pool_size(PoolId, Num) when is_integer(Num) ->
         [] -> ok;
         _ -> {error, Reasons}
     end.
-
 
 %% @spec decrement_pool_size(PoolId, By) -> ok
 %%      PoolId = atom()
@@ -615,6 +611,7 @@ execute(PoolId, StmtName, Args, Timeout)
 %% @see prepare/2.
 %% @end doc: hd feb 11
 %%
+
 execute(PoolId, Query, Args, Timeout, nonblocking) when (is_list(Query) orelse is_binary(Query)) andalso is_list(Args) andalso (is_integer(Timeout) orelse Timeout == infinity) ->
     case emysql_conn_mgr:lock_connection(PoolId) of
         Connection when is_record(Connection, emysql_connection) ->
@@ -723,7 +720,6 @@ as_record(Res, Recname, Fields, Fun) -> emysql_conv:as_record(Res, Recname, Fiel
 %%      Query = binary() | string()
 %%      StmtName = atom()
 %%      Args = [any()]
-
 %%      Timeout = integer() | infinity
 %%      Result = ok_packet() | result_packet() | error_packet()
 %%

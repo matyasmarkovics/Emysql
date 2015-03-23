@@ -24,6 +24,7 @@
 %% WHETHER IN AN ACTION OF CONTRACT,  TORT  OR OTHERWISE,  ARISING
 %% FROM,  OUT OF OR IN CONNECTION WITH THE SOFTWARE  OR THE USE OR
 %% OTHER DEALINGS IN THE SOFTWARE.
+-define(APP, emysql).
 
 -record(pool, {pool_id :: atom(), 
 	       size :: number(), 
@@ -114,7 +115,6 @@
 			rows, extra}).
 
 -define(TIMEOUT, 8000).
--define(LOCK_TIMEOUT, 5000).
 -define(MAXPACKETSIZE, 16777216). %16MB
 
 %% MYSQL CAPABILITIES
@@ -406,4 +406,46 @@
         {<<"utf8mb4_esperanto_ci">>, 241},
         {<<"utf8mb4_hungarian_ci">>, 242},
         {<<"utf8mb4_sinhala_ci">>, 243}
+        ]).
+-define(CHARACTERSETS, [
+        %% {character_set_name, <<"collation_name">>},
+        {big5, <<"big5_chinese_ci">>},
+        {dec8, <<"dec8_swedish_ci">>},
+        {cp850, <<"cp850_general_ci">>},
+        {hp8, <<"hp8_english_ci">>},
+        {koi8r, <<"koi8r_general_ci">>},
+        {latin1, <<"latin1_swedish_ci">>},
+        {latin2, <<"latin2_general_ci">>},
+        {swe7, <<"swe7_swedish_ci">>},
+        {ascii, <<"ascii_general_ci">>},
+        {ujis, <<"ujis_japanese_ci">>},
+        {sjis, <<"sjis_japanese_ci">>},
+        {hebrew, <<"hebrew_general_ci">>},
+        {tis620, <<"tis620_thai_ci">>},
+        {euckr, <<"euckr_korean_ci">>},
+        {koi8u, <<"koi8u_general_ci">>},
+        {gb2312, <<"gb2312_chinese_ci">>},
+        {greek, <<"greek_general_ci">>},
+        {cp1250, <<"cp1250_general_ci">>},
+        {gbk, <<"gbk_chinese_ci">>},
+        {latin5, <<"latin5_turkish_ci">>},
+        {armscii8, <<"armscii8_general_ci">>},
+        {utf8, <<"utf8_general_ci">>},
+        {ucs2, <<"ucs2_general_ci">>},
+        {cp866, <<"cp866_general_ci">>},
+        {keybcs2, <<"keybcs2_general_ci">>},
+        {macce, <<"macce_general_ci">>},
+        {macroman, <<"macroman_general_ci">>},
+        {cp852, <<"cp852_general_ci">>},
+        {latin7, <<"latin7_general_ci">>},
+        {utf8mb4, <<"utf8mb4_general_ci">>},
+        {cp1251, <<"cp1251_general_ci">>},
+        {utf16, <<"utf16_general_ci">>},
+        {cp1256, <<"cp1256_general_ci">>},
+        {cp1257, <<"cp1257_general_ci">>},
+        {utf32, <<"utf32_general_ci">>},
+        {binary, <<"binary">>},
+        {geostd8, <<"geostd8_general_ci">>},
+        {cp932, <<"cp932_japanese_ci">>},
+        {eucjpms, <<"eucjpms_japanese_ci">>}
         ]).

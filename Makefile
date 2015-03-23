@@ -114,3 +114,6 @@ rclean:
 epmd-fix:
 	epmd -daemon
 	ps ax | grep epmd | grep -v grep && epmd -kill
+
+test: build
+	rebar ct
