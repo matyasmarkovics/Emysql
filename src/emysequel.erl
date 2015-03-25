@@ -10,8 +10,13 @@
 %% emysql_app compatibility functions
 -export([modules/0, default_timeout/0, pools/0]).
 %% emysql compatibility functions
--export([pool_start/2, pool_start/3, pool_send_event/2]).
-%% API entypoint
+-export([add_pool/8, remove_pool/1, 
+         increment_pool_size/2, decrement_pool_size/2,
+         execute/2, execute/3, execute/4, execute/5]).
+%% pool management API
+-export([pool_start/2, pool_start/3,
+         pool_send_event/2]).
+%% database cmd API
 -export([call/3, immd/3]).
 
 -include("emysql.hrl").
@@ -112,3 +117,44 @@ immd(PoolName, Cmd, Args) ->
             end
     end.
 
+add_pool(PoolId, Size, User, Password, Host, Port, Database, Encoding) ->
+    pool_start(PoolId, [
+            {size, Size}
+            ], [ 
+            {user, list_to_binary(User)},
+            {password, list_to_binary(Password)},
+            {host, Host},
+            {port, Port},
+            {database, list_to_binary(Database)},
+            {collation, proplists:get_value(Encoding, ?CHARACTERSETS)}
+            ]).
+
+remove_pool(PoolId) ->
+    pool_send_event(PoolId, stop).
+
+increment_pool_size(PoolId, Num) when is_integer(Num) ->
+    pool_send_event(PoolId, {incr, Num}).
+
+decrement_pool_size(PoolId, Num) when is_integer(Num) ->
+    pool_send_event(PoolId, {decr, Num}).
+
+execute(PoolId, Query) when (is_list(Query) orelse is_binary(Query)) ->
+	call(PoolId, fetch, [Query]);
+
+execute(PoolId, StmtName) when is_atom(StmtName) ->
+	call(PoolId, execute, [StmtName]).
+
+execute(PoolId, StmtName, Args) when is_atom(StmtName), is_list(Args) ->
+	call(PoolId, execute, [StmtName, Args]);
+
+execute(PoolId, StmtName, Timeout) when is_atom(StmtName), is_integer(Timeout) ->
+        call(PoolId, execute, [StmtName, [], [timeout, Timeout]]).
+
+execute(PoolId, StmtName, Args, Timeout) when is_atom(StmtName), is_list(Args) andalso is_integer(Timeout) ->
+        call(PoolId, execute, [StmtName, Args, [timeout, Timeout]]).
+
+execute(PoolId, StmtName, Args, Timeout, nonblocking) when is_atom(StmtName), is_list(Args) andalso is_integer(Timeout) ->
+        case immd(PoolId, execute, [StmtName, Args, [timeout, Timeout]]) of
+                full -> unavailable;
+                Result -> Result
+        end.
